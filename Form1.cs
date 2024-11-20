@@ -21,80 +21,12 @@ namespace XpandNPIManager
 
         private async void buttonListFiles_Click(object sender, EventArgs e)
         {
-            try
-            {
-                string vaultName = PromptForVaultName();
-                if (string.IsNullOrEmpty(vaultName))
-                {
-                    MessageBox.Show("Vault name cannot be empty. Operation cancelled.");
-                    return;
-                }
+            await ExecuteListAllFiles();
+        }
 
-                IEdmVault5 vault = new EdmVault5();
-                vault.LoginAuto(vaultName, this.Handle.ToInt32());
-
-                if (!vault.IsLoggedIn)
-                {
-                    Console.WriteLine("Failed to log in to the vault.");
-                    MessageBox.Show("Failed to log in to the vault.");
-                    return;
-                }
-                Console.WriteLine($"Successfully logged into vault: {vaultName}");
-
-
-                if (!vault.IsLoggedIn)
-                {
-                    MessageBox.Show("Failed to log in to the vault.");
-                    return;
-                }
-
-                IEdmFolder5 rootFolder = vault.RootFolder;
-                string selectedFolderPath = BrowseForFolder(rootFolder.LocalPath);
-                if (string.IsNullOrEmpty(selectedFolderPath))
-                {
-                    MessageBox.Show("No folder selected. Operation cancelled.");
-                    return;
-                }
-
-                IEdmFolder5 selectedFolder = vault.GetFolderFromPath(selectedFolderPath);
-                if (selectedFolder == null)
-                {
-                    MessageBox.Show("Selected folder is not part of the vault.");
-                    return;
-                }
-
-                progressBar.Visible = true;
-                lblStatus.Visible = true;
-                progressBar.Value = 0;
-                lblStatus.Text = "Scanning files...";
-                stopwatch.Start();
-
-                string listsFolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Lists");
-                Directory.CreateDirectory(listsFolderPath);
-
-                string timestamp = DateTime.Now.ToString("dd-MM-yyyy-HH-mm");
-                string csvFileName = $"Files{timestamp}.csv";
-                string csvFilePath = Path.Combine(listsFolderPath, csvFileName);
-
-                int totalFiles = await Task.Run(() => CountTotalFiles(selectedFolder));
-                progressBar.Maximum = totalFiles;
-
-                await Task.Run(() => ListFilesRecursively(selectedFolder, csvFilePath, totalFiles));
-
-                stopwatch.Stop();
-                progressBar.Visible = false;
-                lblStatus.Visible = false;
-
-                MessageBox.Show($"File list has been saved to: {csvFilePath}");
-            }
-            catch (System.Runtime.InteropServices.COMException ex)
-            {
-                MessageBox.Show("HRESULT = 0x" + ex.ErrorCode.ToString("X") + "\n" + ex.Message);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message);
-            }
+        private async void btnGetFileLocations_Click(object sender, EventArgs e)
+        {
+            await ExecuteListAllFiles();
         }
 
         private int CountTotalFiles(IEdmFolder5 folder)
@@ -185,7 +117,6 @@ namespace XpandNPIManager
                         Console.WriteLine($"General error during file download: {ex.Message}");
                     }
 
-                    // Rest of your part processing logic
                     string isProd = "0";
                     string revision = "";
                     string partNumber = fileName;
@@ -216,9 +147,6 @@ namespace XpandNPIManager
                 ListFiles(subFolder, writer, ref processedFiles, totalFiles);
             }
         }
-
-
-
 
         private void UpdateProgress(int processedFiles, int totalFiles)
         {
@@ -253,6 +181,77 @@ namespace XpandNPIManager
         private string PromptForVaultName()
         {
             return Microsoft.VisualBasic.Interaction.InputBox("Enter the PDM Vault name:", "Vault Name", "");
+        }
+
+        private async Task ExecuteListAllFiles()
+        {
+            try
+            {
+                string vaultName = PromptForVaultName();
+                if (string.IsNullOrEmpty(vaultName))
+                {
+                    MessageBox.Show("Vault name cannot be empty. Operation cancelled.");
+                    return;
+                }
+
+                IEdmVault5 vault = new EdmVault5();
+                vault.LoginAuto(vaultName, this.Handle.ToInt32());
+
+                if (!vault.IsLoggedIn)
+                {
+                    Console.WriteLine("Failed to log in to the vault.");
+                    MessageBox.Show("Failed to log in to the vault.");
+                    return;
+                }
+                Console.WriteLine($"Successfully logged into vault: {vaultName}");
+
+                IEdmFolder5 rootFolder = vault.RootFolder;
+                string selectedFolderPath = BrowseForFolder(rootFolder.LocalPath);
+                if (string.IsNullOrEmpty(selectedFolderPath))
+                {
+                    MessageBox.Show("No folder selected. Operation cancelled.");
+                    return;
+                }
+
+                IEdmFolder5 selectedFolder = vault.GetFolderFromPath(selectedFolderPath);
+                if (selectedFolder == null)
+                {
+                    MessageBox.Show("Selected folder is not part of the vault.");
+                    return;
+                }
+
+                progressBar.Visible = true;
+                lblStatus.Visible = true;
+                progressBar.Value = 0;
+                lblStatus.Text = "Scanning files...";
+                stopwatch.Start();
+
+                string listsFolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Lists");
+                Directory.CreateDirectory(listsFolderPath);
+
+                string timestamp = DateTime.Now.ToString("dd-MM-yyyy-HH-mm");
+                string csvFileName = $"Files{timestamp}.csv";
+                string csvFilePath = Path.Combine(listsFolderPath, csvFileName);
+
+                int totalFiles = await Task.Run(() => CountTotalFiles(selectedFolder));
+                progressBar.Maximum = totalFiles;
+
+                await Task.Run(() => ListFilesRecursively(selectedFolder, csvFilePath, totalFiles));
+
+                stopwatch.Stop();
+                progressBar.Visible = false;
+                lblStatus.Visible = false;
+
+                MessageBox.Show($"File list has been saved to: {csvFilePath}");
+            }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {
+                MessageBox.Show("HRESULT = 0x" + ex.ErrorCode.ToString("X") + "\n" + ex.Message);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+            }
         }
     }
 }
