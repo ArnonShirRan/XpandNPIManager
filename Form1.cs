@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using EPDM.Interop.epdm;
@@ -33,6 +32,15 @@ namespace XpandNPIManager
 
                 IEdmVault5 vault = new EdmVault5();
                 vault.LoginAuto(vaultName, this.Handle.ToInt32());
+
+                if (!vault.IsLoggedIn)
+                {
+                    Console.WriteLine("Failed to log in to the vault.");
+                    MessageBox.Show("Failed to log in to the vault.");
+                    return;
+                }
+                Console.WriteLine($"Successfully logged into vault: {vaultName}");
+
 
                 if (!vault.IsLoggedIn)
                 {
@@ -127,57 +135,73 @@ namespace XpandNPIManager
             {
                 IEdmFile5 file = folder.GetNextFile(filePos);
                 string fileName = file.Name;
-                Console.WriteLine($"Processing file: {fileName}"); // Debug output
+                Console.WriteLine($"Processing file: {fileName}");
 
-                // Filter only PDF and Parasolid (.x_t) files
                 if (fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".x_t", StringComparison.OrdinalIgnoreCase))
                 {
                     string filePath = file.GetLocalPath(folder.ID);
                     DateTime lastModified = DateTime.MinValue;
 
-                    // Check if the file is cached locally
-                    if (File.Exists(filePath))
+                    // Declare a variable to hold the handle
+                    int parentWindowHandle = 0;
+
+                    // Safely retrieve the handle from the UI thread
+                    if (InvokeRequired)
                     {
-                        try
-                        {
-                            lastModified = File.GetLastWriteTime(filePath);
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Error getting last modified date for {filePath}: {ex.Message}");
-                        }
+                        Invoke(new Action(() => parentWindowHandle = this.Handle.ToInt32()));
                     }
                     else
                     {
-                        Console.WriteLine($"File not cached locally: {filePath}");
+                        parentWindowHandle = this.Handle.ToInt32();
                     }
 
-                    // Initialize default values
+                    try
+                    {
+                        Console.WriteLine($"Attempting to download file: {filePath}");
+                        Console.WriteLine($"File Name: {file.Name}, Folder ID: {folder.ID}");
+
+                        // Call GetFileCopy with adjusted parameters
+                        object versionNoOrRevisionName = 0; // Get the latest version
+                        object pathOrFolderID = folder.ID; // Use the folder ID to specify the download location
+                        file.GetFileCopy(parentWindowHandle, ref versionNoOrRevisionName, ref pathOrFolderID, (int)EdmGetFlag.EdmGet_MakeReadOnly, "");
+
+                        if (File.Exists(filePath))
+                        {
+                            Console.WriteLine($"File successfully downloaded: {filePath}");
+                            lastModified = File.GetLastWriteTime(filePath);
+                            Console.WriteLine($"Date Modified: {lastModified}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"File not found in local cache after download attempt: {filePath}");
+                        }
+                    }
+                    catch (System.Runtime.InteropServices.COMException ex)
+                    {
+                        Console.WriteLine($"Error during file download: HRESULT = 0x{ex.ErrorCode:X}, Message: {ex.Message}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"General error during file download: {ex.Message}");
+                    }
+
+                    // Rest of your part processing logic
                     string isProd = "0";
                     string revision = "";
                     string partNumber = fileName;
 
-                    // Split the filename by underscores and dots
                     string[] parts = fileName.Split(new[] { '_', '.' }, StringSplitOptions.RemoveEmptyEntries);
-
-                    // Loop through parts to find the revision and construct the part number
                     for (int i = 0; i < parts.Length; i++)
                     {
                         if (parts[i].StartsWith("Rev") && parts[i].Length == 4 && char.IsUpper(parts[i][3]))
                         {
-                            // Found the revision
                             revision = parts[i].Substring(3);
                             isProd = "1";
-
-                            // Construct the part number by excluding the revision and file extension
                             partNumber = string.Join("_", parts, 0, i);
                             break;
                         }
                     }
 
-                    Console.WriteLine($"Extracted part number: {partNumber}, revision: {revision}, IsProd: {isProd}"); // Debug output
-
-                    // Write the file details to the CSV
                     writer.WriteLine($"{fileName},{filePath},{lastModified:yyyy-MM-dd HH:mm:ss},{isProd},{revision},{partNumber}");
                 }
 
@@ -192,6 +216,8 @@ namespace XpandNPIManager
                 ListFiles(subFolder, writer, ref processedFiles, totalFiles);
             }
         }
+
+
 
 
         private void UpdateProgress(int processedFiles, int totalFiles)
@@ -209,12 +235,7 @@ namespace XpandNPIManager
             TimeSpan estimatedTotalTime = TimeSpan.FromSeconds(estimatedTotalSeconds);
             TimeSpan remainingTime = estimatedTotalTime - elapsed;
 
-            string elapsedTimeFormatted = elapsed.ToString(@"hh\:mm\:ss");
-            string remainingTimeFormatted = remainingTime.ToString(@"hh\:mm\:ss");
-
-            lblStatus.Text = $"Processed {processedFiles}/{totalFiles}. " +
-                             $"Elapsed time: {elapsedTimeFormatted}. " +
-                             $"Estimated remaining time: {remainingTimeFormatted}.";
+            lblStatus.Text = $"Processed {processedFiles}/{totalFiles}. Elapsed: {elapsed:hh\\:mm\\:ss}. Remaining: {remainingTime:hh\\:mm\\:ss}.";
         }
 
         private string BrowseForFolder(string rootFolderPath)

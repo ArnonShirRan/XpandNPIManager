@@ -1,0 +1,11 @@
+# Ignore Visual Studio files
+.vs/
+*.suo
+
+# Ignore build outputs
+bin/
+obj/
+
+# Ignore debug lists or temporary files
+bin/Debug/Lists/
+*.csv
