@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using EPDM.Interop.epdm;
@@ -26,8 +28,152 @@ namespace XpandNPIManager
 
         private async void btnGetFileLocations_Click(object sender, EventArgs e)
         {
+            // Run the existing list-all-files logic
             await ExecuteListAllFiles();
+
+            // Prompt the user for part numbers
+            string inputPartNumbers = PromptForPartNumbers();
+            if (string.IsNullOrWhiteSpace(inputPartNumbers))
+            {
+                MessageBox.Show("No part numbers entered. Operation cancelled.");
+                return;
+            }
+
+            // Split the input into individual part numbers
+            var partNumbers = inputPartNumbers.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+            // Find the most recent file in the Lists folder
+            string latestCsvFile = GetMostRecentCsv("Lists");
+            if (string.IsNullOrEmpty(latestCsvFile))
+            {
+                MessageBox.Show("No CSV file found in the Lists folder. Operation cancelled.");
+                return;
+            }
+
+            // Process the most recent file to find the most updated files for the part numbers
+            var pnRecords = RetrieveMostUpdatedFilesFromCsv(latestCsvFile, partNumbers);
+
+            // Save the results to a new CSV in the Files folder
+            SaveToPnFilesCsv(pnRecords);
+
+            MessageBox.Show("File locations have been processed and saved.");
         }
+
+        private string PromptForPartNumbers()
+        {
+            using (var form = new Form())
+            {
+                form.Text = "Enter Part Numbers";
+                form.Size = new System.Drawing.Size(400, 300);
+
+                var textBox = new TextBox
+                {
+                    Multiline = true,
+                    Dock = DockStyle.Fill,
+                    ScrollBars = ScrollBars.Vertical
+                };
+
+                var okButton = new Button
+                {
+                    Text = "OK",
+                    Dock = DockStyle.Bottom
+                };
+
+                okButton.Click += (s, e) => form.DialogResult = DialogResult.OK;
+
+                form.Controls.Add(textBox);
+                form.Controls.Add(okButton);
+
+                return form.ShowDialog() == DialogResult.OK ? textBox.Text : null;
+            }
+        }
+
+        private string GetMostRecentCsv(string folderName)
+        {
+            string folderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, folderName);
+            if (!Directory.Exists(folderPath))
+            {
+                return null;
+            }
+
+            return Directory.GetFiles(folderPath, "*.csv")
+                .OrderByDescending(File.GetLastWriteTime)
+                .FirstOrDefault();
+        }
+
+        private List<PnRecord> RetrieveMostUpdatedFilesFromCsv(string csvPath, string[] partNumbers)
+        {
+            var records = new List<PnRecord>();
+            var lines = File.ReadAllLines(csvPath);
+
+            foreach (var partNumber in partNumbers)
+            {
+                string mostUpdatedXtFile = null;
+                string mostUpdatedPdfFile = null;
+                DateTime mostRecentDate = DateTime.MinValue;
+
+                foreach (var line in lines.Skip(1)) // Skip header
+                {
+                    var columns = line.Split(',');
+                    if (columns.Length < 6) continue;
+
+                    string fileName = columns[0];
+                    string filePath = columns[1];
+                    DateTime fileDate = DateTime.Parse(columns[2]);
+                    string currentPartNumber = columns[5];
+
+                    if (!partNumber.Equals(currentPartNumber, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (filePath.EndsWith(".x_t", StringComparison.OrdinalIgnoreCase) && fileDate > mostRecentDate)
+                    {
+                        mostUpdatedXtFile = filePath;
+                        mostRecentDate = fileDate;
+                    }
+
+                    if (filePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) && fileDate > mostRecentDate)
+                    {
+                        mostUpdatedPdfFile = filePath;
+                        mostRecentDate = fileDate;
+                    }
+                }
+
+                records.Add(new PnRecord
+                {
+                    PartNumber = partNumber,
+                    MostUpdatedXtFile = mostUpdatedXtFile,
+                    MostUpdatedPdfFile = mostUpdatedPdfFile
+                });
+            }
+
+            return records;
+        }
+
+        private void SaveToPnFilesCsv(List<PnRecord> pnRecords)
+        {
+            string filesFolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Files");
+            Directory.CreateDirectory(filesFolderPath);
+
+            string outputCsvPath = Path.Combine(filesFolderPath, $"PNFiles_{DateTime.Now:dd-MM-yyyy-HH-mm}.csv");
+
+            using (var writer = new StreamWriter(outputCsvPath))
+            {
+                writer.WriteLine("Part Number,Most Updated x_t File,Most Updated pdf File");
+                foreach (var record in pnRecords)
+                {
+                    writer.WriteLine($"{record.PartNumber},{record.MostUpdatedXtFile},{record.MostUpdatedPdfFile}");
+                }
+            }
+        }
+
+        public class PnRecord
+        {
+            public string PartNumber { get; set; }
+            public string MostUpdatedXtFile { get; set; }
+            public string MostUpdatedPdfFile { get; set; }
+        }
+
+
 
         private int CountTotalFiles(IEdmFolder5 folder)
         {
