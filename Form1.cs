@@ -21,7 +21,6 @@ namespace XpandNPIManager
             lblStatus.Visible = false;
         }
 
-
         private async void buttonListFiles_Click(object sender, EventArgs e)
         {
             await ExecuteListAllFiles();
@@ -29,9 +28,83 @@ namespace XpandNPIManager
 
         private async void btnGetFileLocations_Click(object sender, EventArgs e)
         {
-            // Run the existing list-all-files logic
-            await ExecuteListAllFiles();
+            // Ensure ExecuteListAllFiles completes successfully
+            bool listCreationSucceeded = await ExecuteListAllFiles();
+            if (listCreationSucceeded)
+            {
+                await ProcessFileLocationsAsync();
+            }
+        }
 
+        private async Task<bool> ExecuteListAllFiles()
+        {
+            try
+            {
+                string vaultName = PromptForVaultName();
+                if (string.IsNullOrEmpty(vaultName))
+                {
+                    MessageBox.Show("Vault name cannot be empty. Operation cancelled.");
+                    return false;
+                }
+
+                IEdmVault5 vault = new EdmVault5();
+                vault.LoginAuto(vaultName, this.Handle.ToInt32());
+
+                if (!vault.IsLoggedIn)
+                {
+                    MessageBox.Show("Failed to log in to the vault.");
+                    return false;
+                }
+
+                IEdmFolder5 rootFolder = vault.RootFolder;
+                string selectedFolderPath = BrowseForFolder(rootFolder.LocalPath);
+                if (string.IsNullOrEmpty(selectedFolderPath))
+                {
+                    MessageBox.Show("No folder selected. Operation cancelled.");
+                    return false;
+                }
+
+                IEdmFolder5 selectedFolder = vault.GetFolderFromPath(selectedFolderPath);
+                if (selectedFolder == null)
+                {
+                    MessageBox.Show("Selected folder is not part of the vault.");
+                    return false;
+                }
+
+                progressBar.Visible = true;
+                lblStatus.Visible = true;
+                progressBar.Value = 0;
+                lblStatus.Text = "Scanning files...";
+                stopwatch.Start();
+
+                string listsFolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Lists");
+                Directory.CreateDirectory(listsFolderPath);
+
+                string timestamp = DateTime.Now.ToString("dd-MM-yyyy-HH-mm");
+                string csvFileName = $"Files{timestamp}.csv";
+                string csvFilePath = Path.Combine(listsFolderPath, csvFileName);
+
+                int totalFiles = await Task.Run(() => CountTotalFiles(selectedFolder));
+                progressBar.Maximum = totalFiles;
+
+                await Task.Run(() => ListFilesRecursively(selectedFolder, csvFilePath, totalFiles));
+
+                stopwatch.Stop();
+                progressBar.Visible = false;
+                lblStatus.Visible = false;
+
+                MessageBox.Show($"File list has been saved to: {csvFilePath}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"An error occurred: {ex.Message}");
+                return false;
+            }
+        }
+
+        private async Task ProcessFileLocationsAsync()
+        {
             // Prompt the user for part numbers
             string inputPartNumbers = PromptForPartNumbers();
             if (string.IsNullOrWhiteSpace(inputPartNumbers))
@@ -174,8 +247,6 @@ namespace XpandNPIManager
             public string MostUpdatedPdfFile { get; set; }
         }
 
-
-
         private int CountTotalFiles(IEdmFolder5 folder)
         {
             int count = 0;
@@ -219,50 +290,7 @@ namespace XpandNPIManager
                 if (fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".x_t", StringComparison.OrdinalIgnoreCase))
                 {
                     string filePath = file.GetLocalPath(folder.ID);
-                    DateTime lastModified = DateTime.MinValue;
-
-                    // Declare a variable to hold the handle
-                    int parentWindowHandle = 0;
-
-                    // Safely retrieve the handle from the UI thread
-                    if (InvokeRequired)
-                    {
-                        Invoke(new Action(() => parentWindowHandle = this.Handle.ToInt32()));
-                    }
-                    else
-                    {
-                        parentWindowHandle = this.Handle.ToInt32();
-                    }
-
-                    try
-                    {
-                        Console.WriteLine($"Attempting to download file: {filePath}");
-                        Console.WriteLine($"File Name: {file.Name}, Folder ID: {folder.ID}");
-
-                        // Call GetFileCopy with adjusted parameters
-                        object versionNoOrRevisionName = 0; // Get the latest version
-                        object pathOrFolderID = folder.ID; // Use the folder ID to specify the download location
-                        file.GetFileCopy(parentWindowHandle, ref versionNoOrRevisionName, ref pathOrFolderID, (int)EdmGetFlag.EdmGet_MakeReadOnly, "");
-
-                        if (File.Exists(filePath))
-                        {
-                            Console.WriteLine($"File successfully downloaded: {filePath}");
-                            lastModified = File.GetLastWriteTime(filePath);
-                            Console.WriteLine($"Date Modified: {lastModified}");
-                        }
-                        else
-                        {
-                            Console.WriteLine($"File not found in local cache after download attempt: {filePath}");
-                        }
-                    }
-                    catch (System.Runtime.InteropServices.COMException ex)
-                    {
-                        Console.WriteLine($"Error during file download: HRESULT = 0x{ex.ErrorCode:X}, Message: {ex.Message}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"General error during file download: {ex.Message}");
-                    }
+                    DateTime lastModified = File.GetLastWriteTime(filePath);
 
                     string isProd = "0";
                     string revision = "";
@@ -315,90 +343,27 @@ namespace XpandNPIManager
 
         private string BrowseForFolder(string rootFolderPath)
         {
-            using (FolderBrowserDialog folderDialog = new FolderBrowserDialog())
+            using (var folderDialog = new FolderBrowserDialog())
             {
                 folderDialog.Description = "Select a folder inside the vault:";
-                folderDialog.SelectedPath = rootFolderPath;
+                folderDialog.SelectedPath = rootFolderPath; // Set the initial directory to the root folder
                 folderDialog.ShowNewFolderButton = false;
 
-                return folderDialog.ShowDialog() == DialogResult.OK ? folderDialog.SelectedPath : null;
+                if (folderDialog.ShowDialog() == DialogResult.OK)
+                {
+                    return folderDialog.SelectedPath;
+                }
+
+                return null;
             }
         }
+
+
+
 
         private string PromptForVaultName()
         {
             return Microsoft.VisualBasic.Interaction.InputBox("Enter the PDM Vault name:", "Vault Name", "");
-        }
-
-        private async Task ExecuteListAllFiles()
-        {
-            try
-            {
-                string vaultName = PromptForVaultName();
-                if (string.IsNullOrEmpty(vaultName))
-                {
-                    MessageBox.Show("Vault name cannot be empty. Operation cancelled.");
-                    return;
-                }
-
-                IEdmVault5 vault = new EdmVault5();
-                vault.LoginAuto(vaultName, this.Handle.ToInt32());
-
-                if (!vault.IsLoggedIn)
-                {
-                    Console.WriteLine("Failed to log in to the vault.");
-                    MessageBox.Show("Failed to log in to the vault.");
-                    return;
-                }
-                Console.WriteLine($"Successfully logged into vault: {vaultName}");
-
-                IEdmFolder5 rootFolder = vault.RootFolder;
-                string selectedFolderPath = BrowseForFolder(rootFolder.LocalPath);
-                if (string.IsNullOrEmpty(selectedFolderPath))
-                {
-                    MessageBox.Show("No folder selected. Operation cancelled.");
-                    return;
-                }
-
-                IEdmFolder5 selectedFolder = vault.GetFolderFromPath(selectedFolderPath);
-                if (selectedFolder == null)
-                {
-                    MessageBox.Show("Selected folder is not part of the vault.");
-                    return;
-                }
-
-                progressBar.Visible = true;
-                lblStatus.Visible = true;
-                progressBar.Value = 0;
-                lblStatus.Text = "Scanning files...";
-                stopwatch.Start();
-
-                string listsFolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Lists");
-                Directory.CreateDirectory(listsFolderPath);
-
-                string timestamp = DateTime.Now.ToString("dd-MM-yyyy-HH-mm");
-                string csvFileName = $"Files{timestamp}.csv";
-                string csvFilePath = Path.Combine(listsFolderPath, csvFileName);
-
-                int totalFiles = await Task.Run(() => CountTotalFiles(selectedFolder));
-                progressBar.Maximum = totalFiles;
-
-                await Task.Run(() => ListFilesRecursively(selectedFolder, csvFilePath, totalFiles));
-
-                stopwatch.Stop();
-                progressBar.Visible = false;
-                lblStatus.Visible = false;
-
-                MessageBox.Show($"File list has been saved to: {csvFilePath}");
-            }
-            catch (System.Runtime.InteropServices.COMException ex)
-            {
-                MessageBox.Show("HRESULT = 0x" + ex.ErrorCode.ToString("X") + "\n" + ex.Message);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message);
-            }
         }
     }
 }
