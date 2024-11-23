@@ -26,16 +26,31 @@
         /// </summary>
         private void InitializeComponent()
         {
+            this.btnCreateZip = new System.Windows.Forms.Button();
             this.SuspendLayout();
+            // 
+            // btnCreateZip
+            // 
+            this.btnCreateZip.Location = new System.Drawing.Point(135, 98);
+            this.btnCreateZip.Name = "btnCreateZip";
+            this.btnCreateZip.Size = new System.Drawing.Size(137, 130);
+            this.btnCreateZip.TabIndex = 0;
+            this.btnCreateZip.Text = "Create ZIP from Part Numbers";
+            this.btnCreateZip.UseVisualStyleBackColor = true;
+            this.btnCreateZip.Click += new System.EventHandler(this.btnCreateZip_Click);
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(284, 261);
+            this.Controls.Add(this.btnCreateZip);
             this.Name = "Form1";
             this.Text = "Form1";
             this.ResumeLayout(false);
+
         }
+
+        private System.Windows.Forms.Button btnCreateZip;
     }
 }
